@@ -1,0 +1,188 @@
+---
+- name: install openmrs
+  become: yes
+  hosts: all
+  tasks:
+    - name: Update all packages to their latest version
+      apt:
+        name: "*"
+        state: latest
+    - name: Install latest version of "openjdk-8-jdk" ignoring "install-recommends"
+      apt:
+        name: openjdk-8-jdk
+        state: latest
+        install_recommends: no
+    - name: Creating mysql group
+      ansible.builtin.group:
+          name: mysql
+          state: present
+    - name: Creating mysql user and adding him to mysql group
+      ansible.builtin.user:
+        name: mysql
+        groups: mysql
+        append: yes
+    - name: Download mysql
+      ansible.builtin.get_url:
+        url: https://dev.mysql.com/get/Downloads/MySQL-5.6/mysql-5.6.46-linux-glibc2.12-x86_64.tar.gz
+        dest: /usr/local/
+    - name: Extracting mysql file
+      ansible.builtin.unarchive:
+        src: /usr/local/mysql-5.6.46-linux-glibc2.12-x86_64.tar.gz
+        dest: /usr/local
+        remote_src: yes
+    - name: Change ownership of mysql folder
+      ansible.builtin.file:
+        path: /usr/local/mysql
+        owner: mysql
+        group: mysql
+        recurse: yes
+        state: directory
+    - name: coping mysql to mysql directory
+      ansible.builtin.copy:
+        src: /usr/local/mysql-5.6.46-linux-glibc2.12-x86_64/
+        dest: /usr/local/mysql/
+        remote_src: yes
+    - name: install required packages for mysql
+      apt:
+        name: "{{ item }}"
+        update_cache: yes
+        state: present
+      with_items:
+       - libaio1 
+       - libncurses5
+       - libnuma-dev
+      notify: Executing the script
+    - name: Change ownership of mysql folder
+      file:
+        path: /usr/local/mysql
+        owner: root
+        recurse: yes
+    - name: Change ownership of data folder
+      file:
+        path: /usr/local/mysql/data
+        owner: mysql
+        recurse: yes
+    - name: Copy mysql configuration file
+      copy:
+        src: /usr/local/mysql/support-files/my-default.cnf
+        dest: /etc/my.cnf
+        remote_src: yes
+    - name: Copy mysql configuration file
+      ansible.builtin.copy:
+        src: /usr/local/mysql/support-files/mysql.server
+        dest: /etc/init.d/mysql.server
+        remote_src: yes
+        mode: 1766
+      notify: Creating mysql user
+    - name: Create a symbolic link
+      ansible.builtin.file:
+        src: /usr/local/mysql/bin/mysql
+        dest: /usr/local/bin/mysql
+        state: link
+    - name: Make sure mysql.server is started
+      sysvinit:
+        name: mysql.server
+        state: started
+        enabled: yes
+    - name: reload the daemon, enable and start the mysql server
+      ansible.builtin.systemd:
+        name: 'mysql.server'
+        daemon_reload: yes
+        state: started
+    - name: Creating tomcat group
+      ansible.builtin.group:
+          name: tomcat
+          state: present
+    - name: Creating tomcat directory
+      ansible.builtin.file:
+        path: /opt/tomcat/
+        state: directory
+    - name: Creating tomcat user and adding him to tomcat group and defining the shell
+      ansible.builtin.user:
+        name: tomcat
+        groups: tomcat
+        shell: /bin/false
+        home: /opt/tomcat
+        append: yes
+    - name: Download tomcat
+      ansible.builtin.get_url:
+        url: https://archive.apache.org/dist/tomcat/tomcat-7/v7.0.109/bin/apache-tomcat-7.0.109.tar.gz
+        dest: /opt/tomcat/
+    - name: Extracting tomcat file
+      ansible.builtin.unarchive:
+        src: /opt/tomcat/apache-tomcat-7.0.109.tar.gz
+        dest: /opt/tomcat/
+        remote_src: yes
+    - name: coping tomcat to home directory
+      ansible.builtin.copy:
+        src: /opt/tomcat/apache-tomcat-7.0.109/
+        dest: /opt/tomcat/
+        remote_src: yes
+    - name: Change ownership of conf folder
+      ansible.builtin.file:
+        path: /opt/tomcat/
+        owner: tomcat
+        group: tomcat
+        recurse: yes
+        mode: 'g+u+x'
+    - name: Change ownership of folders
+      ansible.builtin.file:
+        name: "{{ item }}"
+        recurse: yes
+        owner: tomcat
+        mode: 'g+u+x'
+      with_items:
+       - /opt/tomcat/webapps
+       - /opt/tomcat/work
+       - /opt/tomcat/temp
+       - /opt/tomcat/logs
+    - name: Create tomcat configuration file
+      ansible.builtin.file:
+        path: /etc/systemd/system/tomcat.service
+        state: touch
+        mode: 'g+u+x'
+    - name: Copy tomcat configuration file
+      ansible.builtin.copy:
+        src: ./tomcat.service
+        dest: /etc/systemd/system/tomcat.service
+      notify:  
+        - reload the daemon, enable and start the tomcat service
+    - name: Creating home directory for openmrs
+      ansible.builtin.file:
+        path: /var/lib/OpenMRS
+        owner: tomcat
+        group: tomcat
+        recurse: yes
+        state: directory
+    - name: Download openmrs
+      get_url:
+        url: https://sourceforge.net/projects/openmrs/files/releases/OpenMRS_Platform_2.5.0/openmrs.war
+        dest: /var/lib/OpenMRS
+    - name: Copy file
+      ansible.builtin.copy:
+        src: /var/lib/OpenMRS/openmrs.war
+        dest: /opt/tomcat/webapps/
+        remote_src: yes
+    - name: Change file ownership, group and permissions
+      ansible.builtin.file:
+        path: /opt/tomcat/webapps/openmrs.war
+        owner: tomcat
+        group: tomcat
+        mode: 1755
+  handlers:
+    - name: Executing the script
+      command:
+        chdir: /usr/local/mysql
+        cmd: scripts/mysql_install_db --user=mysql
+    - name: Creating mysql user
+      command:
+        cmd: /usr/local/mysql/bin/mysqld_safe --user=mysql & bin/mysqladmin -u root password newpassword
+    - name: reload the daemon, enable and start the tomcat service
+      ansible.builtin.systemd:
+        name: 'tomcat.service'
+        daemon_reload: yes
+        enabled: yes
+        state: started
+    
+    
+    
